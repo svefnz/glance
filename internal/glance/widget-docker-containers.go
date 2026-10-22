@@ -22,6 +22,7 @@ type dockerContainersWidget struct {
 	RunningOnly          bool                         `yaml:"running-only"`
 	Category             string                       `yaml:"category"`
 	SockPath             string                       `yaml:"sock-path"`
+	AgentURL             string                       `yaml:"agent-url"`
 	FormatContainerNames bool                         `yaml:"format-container-names"`
 	Containers           dockerContainerList          `yaml:"-"`
 	LabelOverrides       map[string]map[string]string `yaml:"containers"`
@@ -38,6 +39,17 @@ func (widget *dockerContainersWidget) initialize() error {
 }
 
 func (widget *dockerContainersWidget) update(ctx context.Context) {
+	if widget.AgentURL != "" {
+		containers, err := fetchContainersFromAgent(widget.AgentURL, widget.LabelOverrides)
+		if !widget.canContinueUpdateAfterHandlingErr(err) {
+			return
+		}
+
+		containers.sortByStateIconThenName()
+		widget.Containers = containers
+		return
+	}
+
 	containers, err := fetchDockerContainers(
 		widget.SockPath,
 		widget.HideByDefault,
@@ -567,4 +579,113 @@ func (s *dockerContainerStatsResponse) memoryUsageBytes() uint64 {
 	}
 
 	return usage - cache
+}
+
+// agentContainerStats mirrors the payload of the glance-agent /api/containers
+// endpoint, which reports state plus resource usage for running containers.
+type agentContainerStats struct {
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	Image         string  `json:"image"`
+	State         string  `json:"state"`
+	Status        string  `json:"status"`
+	CPUPercent    float64 `json:"cpu_percent"`
+	MemoryUsedMB  uint64  `json:"memory_used_mb"`
+	MemoryLimitMB uint64  `json:"memory_limit_mb"`
+	MemoryPercent uint8   `json:"memory_percent"`
+}
+
+// fetchContainersFromAgent reads container state and usage from a remote
+// glance-agent. The agent exposes a read-only view, so no Docker socket has to
+// be reachable from this host.
+func fetchContainersFromAgent(agentURL string, labelOverrides map[string]map[string]string) (dockerContainerList, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	endpoint := strings.TrimRight(agentURL, "/") + "/api/containers"
+
+	request, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	response, err := defaultHTTPClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("requesting agent: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("agent returned status %s", response.Status)
+	}
+
+	var stats []agentContainerStats
+	if err := json.NewDecoder(response.Body).Decode(&stats); err != nil {
+		return nil, fmt.Errorf("decoding agent response: %w", err)
+	}
+
+	containers := make(dockerContainerList, 0, len(stats))
+
+	for i := range stats {
+		entry := &stats[i]
+
+		overrides := labelOverrides[entry.Name]
+		labels := dockerContainerLabels{}
+		for label, value := range overrides {
+			labels["glance."+label] = value
+		}
+
+		if stringToBool(labels.getOrDefault(dockerContainerLabelHide, "false")) {
+			continue
+		}
+
+		name := labels.getOrDefault(dockerContainerLabelName, "")
+		if name == "" {
+			name = entry.Name
+			name = strings.ReplaceAll(name, "_", " ")
+			name = strings.ReplaceAll(name, "-", " ")
+			words := strings.Split(name, " ")
+			for j := range words {
+				if len(words[j]) > 0 {
+					words[j] = strings.ToUpper(words[j][:1]) + words[j][1:]
+				}
+			}
+			name = strings.Join(words, " ")
+		}
+
+		dc := dockerContainer{
+			Name:          name,
+			URL:           labels.getOrDefault(dockerContainerLabelURL, ""),
+			Description:   labels.getOrDefault(dockerContainerLabelDescription, ""),
+			SameTab:       stringToBool(labels.getOrDefault(dockerContainerLabelSameTab, "false")),
+			Image:         entry.Image,
+			State:         entry.State,
+			StateText:     entry.Status,
+			Icon:          newCustomIconField(labels.getOrDefault(dockerContainerLabelIcon, "si:docker")),
+			CPUPercent:    entry.CPUPercent,
+			MemoryUsedMB:  entry.MemoryUsedMB,
+			MemoryLimitMB: entry.MemoryLimitMB,
+			MemoryPercent: entry.MemoryPercent,
+			HasStats:      entry.MemoryUsedMB > 0,
+		}
+
+		if strings.Contains(strings.ToLower(entry.Status), "(unhealthy)") {
+			dc.StateIcon = dockerContainerStateIconWarn
+		} else {
+			switch entry.State {
+			case "running":
+				dc.StateIcon = dockerContainerStateIconOK
+			case "paused":
+				dc.StateIcon = dockerContainerStateIconPaused
+			case "exited", "dead":
+				dc.StateIcon = dockerContainerStateIconWarn
+			default:
+				dc.StateIcon = dockerContainerStateIconOther
+			}
+		}
+
+		containers = append(containers, dc)
+	}
+
+	return containers, nil
 }

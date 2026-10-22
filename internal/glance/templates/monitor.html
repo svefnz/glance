@@ -35,6 +35,10 @@
         {{ else }}
         <li class="color-negative" title="{{ .Status.Error }}">ERROR</li>
         {{ end }}
+        {{ if .HasUsage }}
+        <li class="color-highlight" title="CPU {{ printf "%.1f" .CPUPercent }}% / Memory {{ .MemoryUsedMB }}MB of {{ .MemoryLimitMB }}MB">{{ printf "%.1f" .CPUPercent }}% CPU</li>
+        <li title="Memory {{ .MemoryUsedMB }}MB of {{ .MemoryLimitMB }}MB">{{ .MemoryUsedMB }}MB</li>
+        {{ end }}
     </ul>
 </div>
 {{ if eq .StatusStyle "ok" }}

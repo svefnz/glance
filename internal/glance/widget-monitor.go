@@ -2,11 +2,15 @@ package glance
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -28,9 +32,18 @@ type monitorWidget struct {
 		StatusText         string          `yaml:"-"`
 		StatusStyle        string          `yaml:"-"`
 		AltStatusCodes     []int           `yaml:"alt-status-codes"`
+
+		// Container optionally names the container backing this site. When
+		// agent-url is set, its usage is shown alongside the site status.
+		Container     string  `yaml:"container"`
+		CPUPercent    float64 `yaml:"-"`
+		MemoryUsedMB  uint64  `yaml:"-"`
+		MemoryLimitMB uint64  `yaml:"-"`
+		HasUsage      bool    `yaml:"-"`
 	} `yaml:"sites"`
 	Style           string `yaml:"style"`
 	ShowFailingOnly bool   `yaml:"show-failing-only"`
+	AgentURL        string `yaml:"agent-url"`
 	HasFailing      bool   `yaml:"-"`
 }
 
@@ -72,6 +85,54 @@ func (widget *monitorWidget) update(ctx context.Context) {
 
 		site.StatusText = statusCodeToText(status.Code, site.AltStatusCodes)
 		site.StatusStyle = statusCodeToStyle(status.Code, site.AltStatusCodes)
+	}
+
+	widget.attachContainerUsage()
+}
+
+// attachContainerUsage fills in CPU and memory for sites that name a container
+// and have an agent configured. Failures leave usage blank rather than failing
+// the widget, since the status checks already succeeded.
+func (widget *monitorWidget) attachContainerUsage() {
+	if widget.AgentURL == "" {
+		return
+	}
+
+	hasContainer := false
+	for i := range widget.Sites {
+		if widget.Sites[i].Container != "" {
+			hasContainer = true
+			break
+		}
+	}
+	if !hasContainer {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	usage, err := fetchAgentContainerUsage(ctx, widget.AgentURL)
+	if err != nil {
+		slog.Warn("Getting container usage for monitor", "error", err)
+		return
+	}
+
+	for i := range widget.Sites {
+		site := &widget.Sites[i]
+		if site.Container == "" {
+			continue
+		}
+
+		entry, ok := usage[site.Container]
+		if !ok {
+			continue
+		}
+
+		site.CPUPercent = entry.CPUPercent
+		site.MemoryUsedMB = entry.MemoryUsedMB
+		site.MemoryLimitMB = entry.MemoryLimitMB
+		site.HasUsage = entry.MemoryUsedMB > 0
 	}
 }
 
@@ -190,4 +251,37 @@ func fetchStatusForSites(requests []*SiteStatusRequest) ([]siteStatus, error) {
 	}
 
 	return results, nil
+}
+
+// fetchAgentContainerUsage reads container usage from a glance-agent and keys
+// it by container name so sites can look theirs up.
+func fetchAgentContainerUsage(ctx context.Context, agentURL string) (map[string]agentContainerStats, error) {
+	endpoint := strings.TrimRight(agentURL, "/") + "/api/containers"
+
+	request, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	response, err := defaultHTTPClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("requesting agent: %w", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("agent returned status %s", response.Status)
+	}
+
+	var stats []agentContainerStats
+	if err := json.NewDecoder(response.Body).Decode(&stats); err != nil {
+		return nil, fmt.Errorf("decoding agent response: %w", err)
+	}
+
+	byName := make(map[string]agentContainerStats, len(stats))
+	for i := range stats {
+		byName[stats[i].Name] = stats[i]
+	}
+
+	return byName, nil
 }
