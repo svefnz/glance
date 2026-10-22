@@ -687,7 +687,21 @@ async function changeTheme(key, onChanged) {
 
     themeStyleElem.html(newThemeStyle);
     document.documentElement.setAttribute("data-theme", key);
-    document.documentElement.setAttribute("data-scheme", response.headers.get("X-Scheme"));
+
+    if (key == "auto") {
+        // Resolve the scheme here rather than trusting the server, which always
+        // reports dark for the automatic scheme.
+        const query = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)");
+        const prefersLight = !!query && query.matches === true;
+        document.documentElement.setAttribute("data-scheme", prefersLight ? "light" : "dark");
+        if (prefersLight) {
+            const lightSrc = find("#theme-auto-light");
+            if (lightSrc) themeStyleElem.html(lightSrc.textContent);
+        }
+    } else {
+        document.documentElement.setAttribute("data-scheme", response.headers.get("X-Scheme"));
+    }
+
     typeof onChanged == "function" && onChanged();
     setTimeout(() => { tempStyle.remove(); }, 10);
 }

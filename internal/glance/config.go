@@ -49,8 +49,9 @@ type config struct {
 		themeProperties `yaml:",inline"`
 		CustomCSSFile   string `yaml:"custom-css-file"`
 
-		DisablePicker bool                                     `yaml:"disable-picker"`
-		Presets       orderedYAMLMap[string, *themeProperties] `yaml:"presets"`
+		DisablePicker   bool                                     `yaml:"disable-picker"`
+		Presets         orderedYAMLMap[string, *themeProperties] `yaml:"presets"`
+		AutoPreviewHTML template.HTML                            `yaml:"-"`
 	} `yaml:"theme"`
 
 	Branding struct {

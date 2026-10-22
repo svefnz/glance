@@ -7,13 +7,56 @@ import (
 	"time"
 )
 
+const (
+	themeDefaultDarkKey  = "default-dark"
+	themeDefaultLightKey = "default-light"
+	themeAutoKey         = "auto"
+)
+
 var (
 	themeStyleTemplate         = mustParseTemplate("theme-style.gotmpl")
 	themePresetPreviewTemplate = mustParseTemplate("theme-preset-preview.html")
 )
 
+// buildAutoThemePreview renders the picker entry for the automatic scheme.
+// It reuses the light preset's colors so the entry is visually distinct from dark.
+func buildAutoThemePreview(presets orderedYAMLMap[string, *themeProperties], lightKey string) template.HTML {
+	light, ok := presets.Get(lightKey)
+	if !ok {
+		return ""
+	}
+
+	auto := *light
+	auto.Key = themeAutoKey
+
+	preview, err := executeTemplateToString(themePresetPreviewTemplate, &auto)
+	if err != nil {
+		return ""
+	}
+
+	return template.HTML(preview)
+}
+
 func (a *application) handleThemeChangeRequest(w http.ResponseWriter, r *http.Request) {
 	themeKey := r.PathValue("key")
+
+	if themeKey == themeAutoKey {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "theme",
+			Value:    themeAutoKey,
+			Path:     a.Config.Server.BaseURL + "/",
+			SameSite: http.SameSiteLaxMode,
+			Expires:  time.Now().Add(2 * 365 * 24 * time.Hour),
+		})
+
+		// The scheme is chosen client-side; the dark preset is a safe default
+		// for any client that does not run the resolver script.
+		darkCSS := a.themeCSSForKey(themeDefaultDarkKey)
+		w.Header().Set("Content-Type", "text/css")
+		w.Header().Set("X-Scheme", "dark")
+		w.Write([]byte(darkCSS))
+		return
+	}
 
 	properties, exists := a.Config.Theme.Presets.Get(themeKey)
 	if !exists && themeKey != "default" {

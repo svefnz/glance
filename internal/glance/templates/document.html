@@ -7,12 +7,12 @@
     const pageData = {
         /*{{ if .Page }}*/slug: "{{ .Page.Slug }}",/*{{ end }}*/
         baseURL: "{{ .App.Config.Server.BaseURL }}",
-        theme: "{{ .Request.Theme.Key }}",
+        theme: "{{ if .Request.ThemeIsAuto }}auto{{ else }}{{ .Request.Theme.Key }}{{ end }}",
     };
     </script>
     <title>{{ block "document-title" . }}{{ end }}</title>
     <meta charset="UTF-8">
-    <meta name="color-scheme" content="dark">
+    <meta name="color-scheme" content="dark light">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
@@ -24,6 +24,20 @@
     <link rel="icon" type="{{ .App.Config.Branding.FaviconType }}" href="{{ .App.Config.Branding.FaviconURL }}" />
     <link rel="stylesheet" href='{{ .App.StaticAssetPath "css/bundle.css" }}'>
     <style id="theme-style">{{ .Request.Theme.CSS }}</style>
+    <style id="theme-auto-dark" media="not all">{{ .Request.DarkCSS }}</style>
+    <style id="theme-auto-light" media="not all">{{ .Request.LightCSS }}</style>
+    {{ if .Request.ThemeIsAuto }}
+    <script>
+    (function () {
+        var query = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)");
+        var prefersLight = !!query && query.matches === true;
+        document.documentElement.setAttribute("data-scheme", prefersLight ? "light" : "dark");
+        var source = document.getElementById(prefersLight ? "theme-auto-light" : "theme-auto-dark");
+        var target = document.getElementById("theme-style");
+        if (source && target) target.textContent = source.textContent;
+    })();
+    </script>
+    {{ end }}
     {{ if .App.Config.Theme.CustomCSSFile }}<link rel="stylesheet" href="{{ .App.Config.Theme.CustomCSSFile }}?v={{ .App.CreatedAt.Unix }}">{{ end }}
     {{ block "document-head-after" . }}{{ end }}
     {{ if .App.Config.Document.Head }}{{ .App.Config.Document.Head }}{{ end }}

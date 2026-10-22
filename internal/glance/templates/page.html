@@ -73,6 +73,7 @@
                 <div data-popover-html>
                     <div class="theme-choices">
                         {{ .App.Config.Theme.PreviewHTML }}
+                        {{ .App.Config.Theme.AutoPreviewHTML }}
                         {{ range $_, $preset := .App.Config.Theme.Presets.Items }}
                         {{ $preset.PreviewHTML }}
                         {{ end }}

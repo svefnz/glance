@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"path/filepath"
@@ -102,16 +103,16 @@ func newApplication(c *config) (*application, error) {
 	//
 
 	if !config.Theme.DisablePicker {
-		themeKeys := make([]string, 0, 2)
-		themeProps := make([]*themeProperties, 0, 2)
+		themeKeys := make([]string, 0, 3)
+		themeProps := make([]*themeProperties, 0, 3)
 
-		defaultDarkTheme, ok := config.Theme.Presets.Get("default-dark")
+		defaultDarkTheme, ok := config.Theme.Presets.Get(themeDefaultDarkKey)
 		if ok && !config.Theme.SameAs(defaultDarkTheme) || !config.Theme.SameAs(&themeProperties{}) {
-			themeKeys = append(themeKeys, "default-dark")
+			themeKeys = append(themeKeys, themeDefaultDarkKey)
 			themeProps = append(themeProps, &themeProperties{})
 		}
 
-		themeKeys = append(themeKeys, "default-light")
+		themeKeys = append(themeKeys, themeDefaultLightKey)
 		themeProps = append(themeProps, &themeProperties{
 			Light:                    true,
 			BackgroundColor:          &hslColorField{240, 13, 95},
@@ -133,6 +134,10 @@ func newApplication(c *config) (*application, error) {
 				return nil, fmt.Errorf("initializing preset theme %s: %v", key, err)
 			}
 		}
+
+		config.Theme.AutoPreviewHTML = buildAutoThemePreview(
+			config.Theme.Presets, themeDefaultLightKey,
+		)
 	}
 
 	config.Theme.Key = "default"
@@ -278,7 +283,10 @@ func (a *application) resolveUserDefinedAssetPath(path string) string {
 }
 
 type templateRequestData struct {
-	Theme *themeProperties
+	Theme       *themeProperties
+	ThemeIsAuto bool
+	DarkCSS     template.CSS
+	LightCSS    template.CSS
 }
 
 type templateData struct {
@@ -293,14 +301,27 @@ func (a *application) populateTemplateRequestData(data *templateRequestData, r *
 	if !a.Config.Theme.DisablePicker {
 		selectedTheme, err := r.Cookie("theme")
 		if err == nil {
-			preset, exists := a.Config.Theme.Presets.Get(selectedTheme.Value)
-			if exists {
+			if selectedTheme.Value == themeAutoKey {
+				// Resolved client-side so the first frame is already correct;
+				// the dark theme is emitted as a safe server-side default.
+				data.ThemeIsAuto = true
+			} else if preset, exists := a.Config.Theme.Presets.Get(selectedTheme.Value); exists {
 				theme = preset
 			}
 		}
 	}
 
 	data.Theme = theme
+	data.DarkCSS = a.themeCSSForKey(themeDefaultDarkKey)
+	data.LightCSS = a.themeCSSForKey(themeDefaultLightKey)
+}
+
+func (a *application) themeCSSForKey(key string) template.CSS {
+	if preset, exists := a.Config.Theme.Presets.Get(key); exists {
+		return preset.CSS
+	}
+
+	return a.Config.Theme.CSS
 }
 
 func (a *application) handlePageRequest(w http.ResponseWriter, r *http.Request) {
