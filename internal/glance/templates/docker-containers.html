@@ -33,6 +33,19 @@
             {{- end }}
         </div>
 
+        {{- if .HasStats }}
+        <div class="margin-left-auto shrink-0 docker-container-usage" data-popover-type="html" data-popover-position="above" data-popover-offset="0.25" data-popover-margin="0.1rem">
+            <div class="docker-container-usage-values">
+                <span class="color-highlight">{{ printf "%.1f" .CPUPercent }}%</span>
+                <span class="color-subdue">{{ .MemoryUsedMB }}M</span>
+            </div>
+            <div data-popover-html>
+                <div class="color-highlight">CPU: {{ printf "%.1f" .CPUPercent }}%</div>
+                <div>Memory: {{ .MemoryUsedMB }} MB / {{ .MemoryLimitMB }} MB ({{ .MemoryPercent }}%)</div>
+            </div>
+        </div>
+        {{- end }}
+
         <div class="margin-left-auto shrink-0" data-popover-type="text" data-popover-position="above" data-popover-text="{{ .State }}" aria-label="{{ .State }}">
         {{ template "state-icon" .StateIcon }}
         </div>

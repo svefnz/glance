@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -84,6 +85,7 @@ var dockerContainerStateIconPriorities = map[string]int{
 }
 
 type dockerContainerJsonResponse struct {
+	ID     string                `json:"Id"`
 	Names  []string              `json:"Names"`
 	Image  string                `json:"Image"`
 	State  string                `json:"State"`
@@ -121,6 +123,13 @@ type dockerContainer struct {
 	Description string
 	Icon        customIconField
 	Children    dockerContainerList
+
+	rawName       string
+	CPUPercent    float64
+	MemoryUsedMB  uint64
+	MemoryLimitMB uint64
+	MemoryPercent uint8
+	HasStats      bool
 }
 
 type dockerContainerList []dockerContainer
@@ -174,6 +183,7 @@ func fetchDockerContainers(
 		container := &containers[i]
 
 		dc := dockerContainer{
+			rawName:     strings.TrimLeft(itemAtIndexOrDefault(container.Names, 0, ""), "/"),
 			Name:        deriveDockerContainerName(container, formatNames),
 			URL:         container.Labels.getOrDefault(dockerContainerLabelURL, ""),
 			Description: container.Labels.getOrDefault(dockerContainerLabelDescription, ""),
@@ -214,7 +224,82 @@ func fetchDockerContainers(
 		dockerContainers = append(dockerContainers, dc)
 	}
 
+	attachDockerContainerStats(socketPath, containers, dockerContainers)
+
 	return dockerContainers, nil
+}
+
+// attachDockerContainerStats fills in CPU and memory usage for the containers
+// that made it into the rendered list. The stats endpoint blocks for about one
+// sampling interval per call, so the requests run concurrently and a failure
+// only leaves that container without stats rather than failing the widget.
+func attachDockerContainerStats(
+	source string,
+	sources []dockerContainerJsonResponse,
+	targets dockerContainerList,
+) {
+	if len(targets) == 0 {
+		return
+	}
+
+	byName := make(map[string]string, len(sources))
+	for i := range sources {
+		c := &sources[i]
+		if len(c.Names) == 0 {
+			continue
+		}
+		byName[strings.TrimLeft(c.Names[0], "/")] = c.ID
+	}
+
+	client, scheme, hostname, err := newDockerClient(source)
+	if err != nil {
+		return
+	}
+
+	type result struct {
+		index int
+		stats *dockerContainerStatsResponse
+	}
+
+	results := make(chan result, len(targets))
+	var wg sync.WaitGroup
+
+	for i := range targets {
+		id := byName[strings.TrimLeft(targets[i].rawName, "/")]
+		if id == "" {
+			continue
+		}
+
+		wg.Add(1)
+		go func(index int, containerID string) {
+			defer wg.Done()
+			stats, err := fetchDockerContainerStats(client, scheme, hostname, containerID)
+			if err != nil {
+				return
+			}
+			results <- result{index: index, stats: stats}
+		}(i, id)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for r := range results {
+		if r.stats == nil {
+			continue
+		}
+
+		dc := &targets[r.index]
+		dc.HasStats = true
+		dc.CPUPercent = r.stats.cpuPercent()
+		dc.MemoryUsedMB = r.stats.memoryUsageBytes() / 1024 / 1024
+		dc.MemoryLimitMB = r.stats.MemoryStats.Limit / 1024 / 1024
+		if dc.MemoryLimitMB > 0 {
+			dc.MemoryPercent = uint8(min(100, dc.MemoryUsedMB*100/dc.MemoryLimitMB))
+		}
+	}
 }
 
 func deriveDockerContainerName(container *dockerContainerJsonResponse, formatNames bool) string {
@@ -282,24 +367,16 @@ func isDockerContainerHidden(container *dockerContainerJsonResponse, hideByDefau
 	return hideByDefault
 }
 
-func fetchDockerContainersFromSource(
-	source string,
-	category string,
-	runningOnly bool,
-	labelOverrides map[string]map[string]string,
-) ([]dockerContainerJsonResponse, error) {
-	var hostname string
-	var scheme string
-
-	var client *http.Client
+// newDockerClient builds an HTTP client and the scheme/host pair needed to
+// talk to the Docker API, which may be a unix socket or a TCP endpoint.
+func newDockerClient(source string) (*http.Client, string, string, error) {
 	if strings.HasPrefix(source, "tcp://") || strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
-		client = &http.Client{}
 		parsed, err := url.Parse(source)
 		if err != nil {
-			return nil, fmt.Errorf("parsing URL: %w", err)
+			return nil, "", "", fmt.Errorf("parsing URL: %w", err)
 		}
 
-		scheme = parsed.Scheme
+		scheme := parsed.Scheme
 		if scheme == "tcp" {
 			scheme = "http"
 		}
@@ -313,17 +390,29 @@ func fetchDockerContainersFromSource(
 			}
 		}
 
-		hostname = parsed.Hostname() + ":" + port
-	} else {
-		scheme = "http"
-		hostname = "docker"
-		client = &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", source)
-				},
+		return &http.Client{}, scheme, parsed.Hostname() + ":" + port, nil
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", source)
 			},
-		}
+		},
+	}
+
+	return client, "http", "docker", nil
+}
+
+func fetchDockerContainersFromSource(
+	source string,
+	category string,
+	runningOnly bool,
+	labelOverrides map[string]map[string]string,
+) ([]dockerContainerJsonResponse, error) {
+	client, scheme, hostname, err := newDockerClient(source)
+	if err != nil {
+		return nil, err
 	}
 
 	fetchAll := ternary(runningOnly, "false", "true")
@@ -389,4 +478,93 @@ func fetchDockerContainersFromSource(
 	}
 
 	return containers, nil
+}
+
+// dockerContainerStatsResponse holds the subset of Docker's /containers/{id}/stats
+// payload needed to compute CPU and memory usage.
+type dockerContainerStatsResponse struct {
+	CPUStats struct {
+		CPUUsage struct {
+			TotalUsage uint64 `json:"total_usage"`
+		} `json:"cpu_usage"`
+		SystemCPUUsage uint64 `json:"system_cpu_usage"`
+		OnlineCPUs     uint32 `json:"online_cpus"`
+	} `json:"cpu_stats"`
+	PreCPUStats struct {
+		CPUUsage struct {
+			TotalUsage uint64 `json:"total_usage"`
+		} `json:"cpu_usage"`
+		SystemCPUUsage uint64 `json:"system_cpu_usage"`
+	} `json:"precpu_stats"`
+	MemoryStats struct {
+		Usage uint64            `json:"usage"`
+		Limit uint64            `json:"limit"`
+		Stats map[string]uint64 `json:"stats"`
+	} `json:"memory_stats"`
+}
+
+// fetchDockerContainerStats queries a single container's stats endpoint.
+// The endpoint blocks for roughly one sampling interval when stream is false,
+// so callers must fetch these concurrently and allow a generous timeout.
+func fetchDockerContainerStats(client *http.Client, scheme, hostname, id string) (*dockerContainerStatsResponse, error) {
+	request, err := http.NewRequest(
+		"GET",
+		scheme+"://"+hostname+"/containers/"+url.PathEscape(id)+"/stats?stream=false",
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("non-200 response status: %s", response.Status)
+	}
+
+	var stats dockerContainerStatsResponse
+	if err := json.NewDecoder(response.Body).Decode(&stats); err != nil {
+		return nil, err
+	}
+
+	return &stats, nil
+}
+
+// cpuPercent mirrors the calculation the Docker CLI uses: the change in the
+// container's CPU time over the change in system CPU time, scaled by core count.
+func (s *dockerContainerStatsResponse) cpuPercent() float64 {
+	cpuDelta := float64(s.CPUStats.CPUUsage.TotalUsage) - float64(s.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(s.CPUStats.SystemCPUUsage) - float64(s.PreCPUStats.SystemCPUUsage)
+
+	if cpuDelta <= 0 || systemDelta <= 0 {
+		return 0
+	}
+
+	cores := float64(s.CPUStats.OnlineCPUs)
+	if cores == 0 {
+		cores = 1
+	}
+
+	return (cpuDelta / systemDelta) * cores * 100
+}
+
+// memoryUsageBytes returns working-set memory, excluding page cache, which is
+// what the Docker CLI reports as container memory usage.
+func (s *dockerContainerStatsResponse) memoryUsageBytes() uint64 {
+	usage := s.MemoryStats.Usage
+
+	cache := s.MemoryStats.Stats["inactive_file"]
+	if cache == 0 {
+		cache = s.MemoryStats.Stats["cache"]
+	}
+
+	if cache >= usage {
+		return 0
+	}
+
+	return usage - cache
 }
