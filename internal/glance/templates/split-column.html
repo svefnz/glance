@@ -3,7 +3,7 @@
 {{ define "widget-content-classes" }}widget-content-frameless{{ end }}
 
 {{ define "widget-content" }}
-<div class="masonry" data-max-columns="{{ .MaxColumns }}">
+<div class="masonry" data-max-columns="{{ .MaxColumns }}" data-min-column-width="{{ .MinColumnWidth }}">
 {{ range .Widgets }}
     {{ .Render }}
 {{ end }}

@@ -12,6 +12,7 @@ type splitColumnWidget struct {
 	widgetBase          `yaml:",inline"`
 	containerWidgetBase `yaml:",inline"`
 	MaxColumns          int `yaml:"max-columns"`
+	MinColumnWidth      int `yaml:"min-column-width"`
 }
 
 func (widget *splitColumnWidget) initialize() error {
@@ -23,6 +24,10 @@ func (widget *splitColumnWidget) initialize() error {
 
 	if widget.MaxColumns < 2 {
 		widget.MaxColumns = 2
+	}
+
+	if widget.MinColumnWidth < 1 {
+		widget.MinColumnWidth = 330
 	}
 
 	return nil
