@@ -63,6 +63,11 @@ func (widget *monitorWidget) update(ctx context.Context) {
 
 	statuses, err := fetchStatusForSites(requests)
 
+	// Container usage is independent of site reachability, so it is fetched
+	// before the error check: one dead site should not blank the CPU and
+	// memory of every other site in the same widget.
+	widget.attachContainerUsage()
+
 	if !widget.canContinueUpdateAfterHandlingErr(err) {
 		return
 	}
@@ -87,8 +92,6 @@ func (widget *monitorWidget) update(ctx context.Context) {
 		site.StatusText = statusCodeToText(status.Code, site.AltStatusCodes)
 		site.StatusStyle = statusCodeToStyle(status.Code, site.AltStatusCodes)
 	}
-
-	widget.attachContainerUsage()
 }
 
 // attachContainerUsage fills in CPU and memory for sites that name a container
