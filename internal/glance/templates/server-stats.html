@@ -8,16 +8,16 @@
             <div class="server-name color-highlight size-h3">{{ if .Name }}{{ .Name }}{{ else }}{{ .Info.Hostname }}{{ end }}</div>
             <div>
                 {{- if .IsReachable }}
-                    {{ if .Info.HostInfoIsAvailable }}<span {{ dynamicRelativeTimeAttrs .Info.BootTime }}></span>{{ else }}unknown{{ end }} uptime
+                    {{ if .Info.HostInfoIsAvailable }}<span {{ dynamicRelativeTimeAttrs .Info.BootTime }}></span>{{ else }}未知{{ end }} 运行时间
                 {{- else }}
-                    unreachable
+                    无法连接
                 {{- end }}
             </div>
         </div>
         <div class="shrink-0"{{ if .IsReachable }} data-popover-type="html" data-popover-margin="0.2rem" data-popover-max-width="400px"{{ end }}>
             {{- if .IsReachable }}
             <div data-popover-html>
-                <div class="size-h5 text-compact">PLATFORM</div>
+                <div class="size-h5 text-compact">平台</div>
                 <div class="color-highlight">{{ if .Info.HostInfoIsAvailable }}{{ .Info.Platform }}{{ else }}Unknown{{ end }}</div>
             </div>
             {{- end }}
@@ -41,18 +41,18 @@
                 {{- if .Info.CPU.LoadIsAvailable }}
                 <div data-popover-html>
                     <div class="flex">
-                        <div class="size-h5">1M AVG</div>
+                        <div class="size-h5">1分钟均值</div>
                         <div class="value-separator"></div>
                         <div class="color-highlight text-very-compact">{{ .Info.CPU.Load1Percent }} <span class="color-base size-h5">%</span></div>
                     </div>
                     <div class="flex margin-top-3">
-                        <div class="size-h5">15M AVG</div>
+                        <div class="size-h5">15分钟均值</div>
                         <div class="value-separator"></div>
                         <div class="color-highlight text-very-compact">{{ .Info.CPU.Load15Percent }} <span class="color-base size-h5">%</span></div>
                     </div>
                     {{- if .Info.CPU.TemperatureIsAvailable }}
                     <div class="flex margin-top-3">
-                        <div class="size-h5">TEMP C</div>
+                        <div class="size-h5">温度</div>
                         <div class="value-separator"></div>
                         <div class="color-highlight text-very-compact">{{ .Info.CPU.TemperatureC }} <span class="color-base size-h5">°</span></div>
                     </div>
@@ -69,14 +69,14 @@
         </div>
         <div class="flex-1{{ if not .Info.Memory.IsAvailable }} server-stat-unavailable{{ end }}">
             <div class="flex justify-between items-end size-h5">
-                <div>RAM</div>
+                <div>内存</div>
                 <div class="color-highlight text-very-compact">{{ if .Info.Memory.IsAvailable }}{{ .Info.Memory.UsedPercent }} <span class="color-base">%</span>{{ else }}n/a{{ end }}</div>
             </div>
             <div{{ if .Info.Memory.IsAvailable }} data-popover-type="html"{{ end }}>
                 {{- if .Info.Memory.IsAvailable }}
                 <div data-popover-html>
                     <div class="flex">
-                        <div class="size-h5">RAM</div>
+                        <div class="size-h5">内存</div>
                         <div class="value-separator"></div>
                         <div class="color-highlight text-very-compact">
                             {{ .Info.Memory.UsedMB | formatServerMegabytes }} <span class="color-base size-h5">/</span> {{ .Info.Memory.TotalMB | formatServerMegabytes }}
@@ -84,7 +84,7 @@
                     </div>
                     {{- if and (not .HideSwap) .Info.Memory.SwapIsAvailable }}
                     <div class="flex margin-top-3">
-                        <div class="size-h5">SWAP</div>
+                        <div class="size-h5">交换</div>
                         <div class="value-separator"></div>
                         <div class="color-highlight text-very-compact">
                             {{ .Info.Memory.SwapUsedMB | formatServerMegabytes }} <span class="color-base size-h5">/</span> {{ .Info.Memory.SwapTotalMB | formatServerMegabytes }}
@@ -105,7 +105,7 @@
         </div>
         <div class="flex-1{{ if not .Info.Mountpoints }} server-stat-unavailable{{ end }}">
             <div class="flex justify-between items-end size-h5">
-                <div>DISK</div>
+                <div>磁盘</div>
                 <div class="color-highlight text-very-compact">{{ if .Info.Mountpoints }}{{ (index .Info.Mountpoints 0).UsedPercent }} <span class="color-base">%</span>{{ else }}n/a{{ end }}</div>
             </div>
             <div{{ if .Info.Mountpoints }} data-popover-type="html"{{ end }}>

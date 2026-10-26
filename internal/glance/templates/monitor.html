@@ -3,9 +3,9 @@
 {{ define "widget-content" }}
 {{ if not (and .ShowFailingOnly (not .HasFailing)) }}
 <div class="monitor-banner monitor-banner-{{ if .HasFailing }}failing{{ else if .HasDegraded }}degraded{{ else }}ok{{ end }}">
-    {{ if .HasFailing }}Some services are down
-    {{ else if .HasDegraded }}Some services are degraded
-    {{ else }}All systems operational{{ end }}
+    {{ if .HasFailing }}部分服务故障
+    {{ else if .HasDegraded }}部分服务缓慢
+    {{ else }}所有系统运行正常{{ end }}
 </div>
 
 <ul class="monitor-list">
@@ -24,7 +24,7 @@
     {{ end }}
 </ul>
 {{ else }}
-<div class="monitor-banner monitor-banner-ok">All systems operational</div>
+<div class="monitor-banner monitor-banner-ok">所有系统运行正常</div>
 {{ end }}
 {{ end }}
 
@@ -40,8 +40,8 @@
         <li>{{ .Status.ResponseTime.Milliseconds | formatNumber }}ms</li>
         {{ end }}
         {{ if .HasUsage }}
-        <li class="color-highlight" title="CPU {{ printf "%.1f" .CPUPercent }}% / Memory {{ .MemoryUsedMB }}MB of {{ .MemoryLimitMB }}MB">{{ printf "%.1f" .CPUPercent }}% CPU</li>
-        <li title="Memory {{ .MemoryUsedMB }}MB of {{ .MemoryLimitMB }}MB">{{ .MemoryUsedMB }}MB</li>
+        <li class="color-highlight" title="CPU {{ printf "%.1f" .CPUPercent }}% / 内存 {{ .MemoryUsedMB }}MB / {{ .MemoryLimitMB }}MB">{{ printf "%.1f" .CPUPercent }}% CPU</li>
+        <li title="内存 {{ .MemoryUsedMB }}MB / {{ .MemoryLimitMB }}MB">{{ .MemoryUsedMB }}MB</li>
         {{ end }}
     </ul>
 </div>

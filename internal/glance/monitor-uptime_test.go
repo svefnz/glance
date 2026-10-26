@@ -1,8 +1,10 @@
 package glance
 
 import (
+	"io/fs"
 	"path/filepath"
 	"strings"
+
 	"testing"
 	"time"
 )
@@ -309,25 +311,25 @@ func TestClassifySiteState(t *testing.T) {
 			name:     "fast success is healthy",
 			status:   &siteStatus{Code: 200, ResponseTime: 100 * time.Millisecond},
 			wantKey:  "ok",
-			wantText: "Operational",
+			wantText: "正常",
 		},
 		{
 			name:     "slow success is degraded",
 			status:   &siteStatus{Code: 200, ResponseTime: 2 * time.Second},
 			wantKey:  "degraded",
-			wantText: "Degraded",
+			wantText: "缓慢",
 		},
 		{
 			name:     "error is failing",
 			status:   &siteStatus{Code: 500, ResponseTime: 100 * time.Millisecond},
 			wantKey:  "failing",
-			wantText: "Down",
+			wantText: "故障",
 		},
 		{
 			name:     "timeout is failing",
 			status:   &siteStatus{TimedOut: true},
 			wantKey:  "failing",
-			wantText: "Down",
+			wantText: "故障",
 		},
 	}
 
@@ -538,5 +540,325 @@ func TestCompactVariantRenders(t *testing.T) {
 	}
 	if !strings.Contains(out, "monitor-site-status-icon-compact") {
 		t.Error("compact variant did not render its status icon")
+	}
+}
+
+// The compact variant conveys state through an icon and a status-code tooltip,
+// never through a word, so the state-text localization does not reach it.
+func TestCompactVariantRendersNoStateText(t *testing.T) {
+	w := &monitorWidget{}
+	w.Title = "test"
+	w.ContentAvailable = true
+	w.Style = "compact"
+	w.Sites = append(w.Sites, struct {
+		*SiteStatusRequest `yaml:",inline"`
+		Status             *siteStatus     `yaml:"-"`
+		URL                string          `yaml:"-"`
+		ErrorURL           string          `yaml:"error-url"`
+		Title              string          `yaml:"title"`
+		Icon               customIconField `yaml:"icon"`
+		SameTab            bool            `yaml:"same-tab"`
+		StatusText         string          `yaml:"-"`
+		StatusStyle        string          `yaml:"-"`
+		StateKey           string          `yaml:"-"`
+		StateText          string          `yaml:"-"`
+		Uptime             []uptimeBucket  `yaml:"-"`
+		HasUptime          bool            `yaml:"-"`
+		AltStatusCodes     []int           `yaml:"alt-status-codes"`
+		Container          string          `yaml:"container"`
+		CPUPercent         float64         `yaml:"-"`
+		MemoryUsedMB       uint64          `yaml:"-"`
+		MemoryLimitMB      uint64          `yaml:"-"`
+		HasUsage           bool            `yaml:"-"`
+	}{
+		SiteStatusRequest: &SiteStatusRequest{},
+		Title:             "compact-site",
+		Status:            &siteStatus{Code: 200, ResponseTime: 50 * time.Millisecond},
+		StateKey:          "ok",
+		StateText:         "正常",
+	})
+
+	out := string(w.Render())
+
+	for _, word := range []string{"正常", "Operational"} {
+		if strings.Contains(out, word) {
+			t.Errorf("compact variant rendered state text %q; it should show an icon only", word)
+		}
+	}
+
+	if !strings.Contains(out, "compact-site") {
+		t.Error("compact variant did not render the site title")
+	}
+	if !strings.Contains(out, "monitor-site-status-icon-compact") {
+		t.Error("compact variant did not render its status icon")
+	}
+}
+
+func TestBannerTextIsChinese(t *testing.T) {
+	render := func(hasFailing, hasDegraded bool) string {
+		w := &monitorWidget{}
+		w.HasFailing = hasFailing
+		w.HasDegraded = hasDegraded
+		w.Title = "test"
+		w.ContentAvailable = true
+		return string(w.Render())
+	}
+
+	cases := []struct {
+		name        string
+		failing     bool
+		degraded    bool
+		wantText    string
+		rejectWords []string
+	}{
+		{"failing", true, false, "部分服务故障", []string{"Some services are down"}},
+		{"degraded", false, true, "部分服务缓慢", []string{"Some services are degraded"}},
+		{"healthy", false, false, "所有系统运行正常", []string{"All systems operational"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := render(tc.failing, tc.degraded)
+
+			if !strings.Contains(out, tc.wantText) {
+				t.Errorf("banner missing %q", tc.wantText)
+			}
+			for _, word := range tc.rejectWords {
+				if strings.Contains(out, word) {
+					t.Errorf("banner still contains English %q", word)
+				}
+			}
+		})
+	}
+}
+
+// A widget configured to show only failing services renders an empty state when
+// none fail. Both variants must show it in Chinese.
+func TestFilteredEmptyStateIsChinese(t *testing.T) {
+	build := func(style string) string {
+		w := &monitorWidget{}
+		w.Title = "test"
+		w.ContentAvailable = true
+		w.Style = style
+		w.ShowFailingOnly = true
+		w.HasFailing = false
+		return string(w.Render())
+	}
+
+	for _, style := range []string{"", "compact"} {
+		name := "standard"
+		if style != "" {
+			name = style
+		}
+
+		out := build(style)
+		label := "monitor"
+		if style != "" {
+			label = "monitor-compact"
+		}
+
+		if strings.Contains(out, "All sites are online") {
+			t.Errorf("%s (%s): still contains English empty state", name, label)
+		}
+	}
+
+	// The compact variant owns the explicit empty-state sentence.
+	if out := build("compact"); !strings.Contains(out, "所有站点在线") {
+		t.Errorf("compact empty state is not Chinese: %s", out)
+	}
+}
+
+// The tooltip's prose becomes Chinese; the numbers, MB and the percentage stay
+// as units.
+func TestMemoryTooltipIsChinese(t *testing.T) {
+	w := &monitorWidget{}
+	w.Title = "test"
+	w.ContentAvailable = true
+	w.Sites = append(w.Sites, struct {
+		*SiteStatusRequest `yaml:",inline"`
+		Status             *siteStatus     `yaml:"-"`
+		URL                string          `yaml:"-"`
+		ErrorURL           string          `yaml:"error-url"`
+		Title              string          `yaml:"title"`
+		Icon               customIconField `yaml:"icon"`
+		SameTab            bool            `yaml:"same-tab"`
+		StatusText         string          `yaml:"-"`
+		StatusStyle        string          `yaml:"-"`
+		StateKey           string          `yaml:"-"`
+		StateText          string          `yaml:"-"`
+		Uptime             []uptimeBucket  `yaml:"-"`
+		HasUptime          bool            `yaml:"-"`
+		AltStatusCodes     []int           `yaml:"alt-status-codes"`
+		Container          string          `yaml:"container"`
+		CPUPercent         float64         `yaml:"-"`
+		MemoryUsedMB       uint64          `yaml:"-"`
+		MemoryLimitMB      uint64          `yaml:"-"`
+		HasUsage           bool            `yaml:"-"`
+	}{
+		SiteStatusRequest: &SiteStatusRequest{},
+		Title:             "site",
+		Status:            &siteStatus{Code: 200, ResponseTime: 50 * time.Millisecond},
+		StateKey:          "ok",
+		StateText:         "正常",
+		CPUPercent:        1.5,
+		MemoryUsedMB:      1690,
+		MemoryLimitMB:     2474,
+		HasUsage:          true,
+	})
+
+	out := string(w.Render())
+
+	if !strings.Contains(out, "内存 1690MB / 2474MB") {
+		t.Errorf("memory tooltip is not Chinese with unchanged units")
+	}
+	if strings.Contains(out, "Memory 1690") {
+		t.Error("memory tooltip still uses the English word Memory")
+	}
+	if !strings.Contains(out, "1.5% CPU") {
+		t.Error("CPU value or unit changed")
+	}
+}
+
+// The metric labels are Chinese; CPU stays as a unit abbreviation.
+func TestServerStatsLabelsAreChinese(t *testing.T) {
+	labels := map[string]string{
+		"PLATFORM": "平台",
+		"RAM":      "内存",
+		"SWAP":     "交换",
+		"DISK":     "磁盘",
+		"TEMP C":   "温度",
+	}
+
+	raw, err := fs.ReadFile(templateFS, "server-stats.html")
+	if err != nil {
+		t.Fatalf("reading template: %v", err)
+	}
+	body := string(raw)
+
+	for old, new := range labels {
+		if strings.Contains(body, ">"+old+"<") {
+			t.Errorf("label %q is still English", old)
+		}
+		if !strings.Contains(body, ">"+new+"<") {
+			t.Errorf("label %q is missing", new)
+		}
+	}
+
+	if !strings.Contains(body, ">CPU<") {
+		t.Error("CPU label was removed; it should stay as a unit")
+	}
+}
+
+func TestServerStatsLoadLabelsAreChinese(t *testing.T) {
+	raw, err := fs.ReadFile(templateFS, "server-stats.html")
+	if err != nil {
+		t.Fatalf("reading template: %v", err)
+	}
+	body := string(raw)
+
+	for _, word := range []string{"1M AVG", "15M AVG"} {
+		if strings.Contains(body, ">"+word+"<") {
+			t.Errorf("load label %q is still English", word)
+		}
+	}
+
+	for _, want := range []string{"1分钟均值", "15分钟均值"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("load label %q is missing", want)
+		}
+	}
+}
+
+func TestServerStatsUptimeStatesAreChinese(t *testing.T) {
+	raw, err := fs.ReadFile(templateFS, "server-stats.html")
+	if err != nil {
+		t.Fatalf("reading template: %v", err)
+	}
+	body := string(raw)
+
+	for _, word := range []string{"unknown", "unreachable", "> uptime"} {
+		if strings.Contains(body, word) {
+			t.Errorf("uptime state %q is still English", word)
+		}
+	}
+
+	for _, want := range []string{"未知", "运行时间", "无法连接"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("uptime state %q is missing", want)
+		}
+	}
+}
+
+func TestContainerMemoryLabelIsChinese(t *testing.T) {
+	raw, err := fs.ReadFile(templateFS, "docker-containers.html")
+	if err != nil {
+		t.Fatalf("reading template: %v", err)
+	}
+	body := string(raw)
+
+	if strings.Contains(body, "Memory:") {
+		t.Error("container memory label is still English")
+	}
+	if !strings.Contains(body, "内存：") {
+		t.Error("container memory label is not Chinese")
+	}
+	// Values and units must be untouched.
+	if !strings.Contains(body, "{{ .MemoryUsedMB }} MB / {{ .MemoryLimitMB }} MB ({{ .MemoryPercent }}%)") {
+		t.Error("memory values or units changed")
+	}
+}
+
+func TestContainerEmptyStateIsChinese(t *testing.T) {
+	raw, err := fs.ReadFile(templateFS, "docker-containers.html")
+	if err != nil {
+		t.Fatalf("reading template: %v", err)
+	}
+	body := string(raw)
+
+	if strings.Contains(body, "No containers available to show.") {
+		t.Error("container empty state is still English")
+	}
+	if !strings.Contains(body, "暂无容器") {
+		t.Error("container empty state is not Chinese")
+	}
+}
+
+// Abbreviations and HTTP status descriptions stay English so readings stay
+// comparable with logs.
+func TestTechnicalAbbreviationsStayEnglish(t *testing.T) {
+	// Status descriptions come from statusCodeToText.
+	cases := map[int]string{
+		404: "Not Found",
+		403: "Forbidden",
+		401: "Unauthorized",
+		500: "Server Error",
+		400: "Client Error",
+	}
+	for code, want := range cases {
+		if got := statusCodeToText(code, nil); got != want {
+			t.Errorf("statusCodeToText(%d) = %q, want %q", code, got, want)
+		}
+	}
+	if got := statusCodeToText(200, nil); got != "OK" {
+		t.Errorf("statusCodeToText(200) = %q, want OK", got)
+	}
+
+	// Units stay as-is across the localized templates.
+	checks := map[string][]string{
+		"monitor.html":           {"% CPU", "ms"},
+		"server-stats.html":      {">CPU<", "n/a", "%"},
+		"docker-containers.html": {"%", " MB"},
+	}
+	for file, units := range checks {
+		raw, err := fs.ReadFile(templateFS, file)
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+		body := string(raw)
+		for _, unit := range units {
+			if !strings.Contains(body, unit) {
+				t.Errorf("%s: unit %q is missing", file, unit)
+			}
+		}
 	}
 }

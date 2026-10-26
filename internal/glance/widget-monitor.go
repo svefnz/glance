@@ -152,14 +152,14 @@ const degradedResponseTime = 500 * time.Millisecond
 // poorly is distinguishable from one that works well.
 func classifySiteState(status *siteStatus, altStatusCodes []int) (key string, text string) {
 	if status.Error != nil || status.TimedOut || (status.Code >= 400 && !slices.Contains(altStatusCodes, status.Code)) {
-		return "failing", "Down"
+		return "failing", "故障"
 	}
 
 	if status.ResponseTime > degradedResponseTime {
-		return "degraded", "Degraded"
+		return "degraded", "缓慢"
 	}
 
-	return "ok", "Operational"
+	return "ok", "正常"
 }
 
 // attachUptime fills in the availability bar for sites when the widget enables
