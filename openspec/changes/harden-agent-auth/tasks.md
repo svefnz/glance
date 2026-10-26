@@ -2,9 +2,9 @@
 
 ## 1. Agent: token becomes mandatory
 
-- [ ] 1.1 Remove the `config.Server.Token != ""` guard from `isAuthorized` in `internal/agent/server.go` so the comparison always runs. Verify by starting an agent with a token and confirming an unauthenticated request returns 401 rather than data.
-- [ ] 1.2 Add startup validation in `internal/agent/config.go` that exits with a clear error when the token is empty or absent, for both the file and environment-variable configuration paths. Verify by starting an agent with no token and no `TOKEN` environment variable, and confirming the process exits non-zero without binding a port.
-- [ ] 1.3 Update `internal/install/templates/agent.yml` so a token is always emitted rather than only when `RandomAuthToken` is set, and confirm the rendered template contains a `token:` line with a non-empty value.
+- [x] 1.1 Remove the `config.Server.Token != ""` guard from `isAuthorized` in `internal/agent/server.go` so the comparison always runs. Verify by starting an agent with a token and confirming an unauthenticated request returns 401 rather than data.
+- [x] 1.2 Add startup validation in `internal/agent/config.go` that exits with a clear error when the token is empty or absent, for both the file and environment-variable configuration paths. Verify by starting an agent with no token and no `TOKEN` environment variable, and confirming the process exits non-zero without binding a port.
+- [x] 1.3 Update `internal/install/templates/agent.yml` so a token is always emitted rather than only when `RandomAuthToken` is set, and confirm the rendered template contains a `token:` line with a non-empty value.
 - [ ] 1.4 Add a test covering the three authorization outcomes (no header, wrong token, correct token) and verify it passes with `go test ./internal/agent/`.
 
 ## 2. Dashboard: every agent consumer sends its token
