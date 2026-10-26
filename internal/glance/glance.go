@@ -43,6 +43,7 @@ type application struct {
 	usernameHashToUsername map[string]string
 	authAttemptsMu         sync.Mutex
 	failedAuthAttempts     map[string]*failedAuthAttempt
+	uptimeStore            *uptimeStore
 }
 
 func newApplication(c *config) (*application, error) {
@@ -146,6 +147,38 @@ func newApplication(c *config) (*application, error) {
 	}
 
 	//
+	// Init uptime history
+	//
+
+	dataPath := config.DataPath
+	if dataPath == "" {
+		dataPath = "data"
+	}
+
+	uptimeStore, err := openUptimeStore(filepath.Join(dataPath, "uptime.db"))
+	if err != nil {
+		return nil, err
+	}
+	app.uptimeStore = uptimeStore
+
+	// Retention follows the longest configured window, defaulting to the
+	// standard range when no widget enables uptime.
+	retention := uptimeRangeDefault
+	for i := range config.Pages {
+		for c := range config.Pages[i].Columns {
+			for _, w := range config.Pages[i].Columns[c].Widgets {
+				if m, ok := w.(*monitorWidget); ok && m.Uptime.Enabled {
+					if r := time.Duration(m.Uptime.Range); r > retention {
+						retention = r
+					}
+				}
+			}
+		}
+	}
+	uptimeStore.startPruner(retention, time.Hour)
+	uptimeStore.startPruner(retention, time.Hour)
+
+	//
 	// Init pages
 	//
 
@@ -153,6 +186,7 @@ func newApplication(c *config) (*application, error) {
 
 	providers := &widgetProviders{
 		assetResolver: app.StaticAssetPath,
+		uptimeStore:   app.uptimeStore,
 	}
 
 	for p := range config.Pages {

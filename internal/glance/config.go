@@ -45,6 +45,9 @@ type config struct {
 		Head template.HTML `yaml:"head"`
 	} `yaml:"document"`
 
+	// DataPath is where persistent state such as monitor uptime history lives.
+	DataPath string `yaml:"data-path"`
+
 	Theme struct {
 		themeProperties `yaml:",inline"`
 		CustomCSSFile   string `yaml:"custom-css-file"`

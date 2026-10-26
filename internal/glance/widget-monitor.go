@@ -31,6 +31,10 @@ type monitorWidget struct {
 		SameTab            bool            `yaml:"same-tab"`
 		StatusText         string          `yaml:"-"`
 		StatusStyle        string          `yaml:"-"`
+		StateKey           string          `yaml:"-"`
+		StateText          string          `yaml:"-"`
+		Uptime             []uptimeBucket  `yaml:"-"`
+		HasUptime          bool            `yaml:"-"`
 		AltStatusCodes     []int           `yaml:"alt-status-codes"`
 
 		// Container optionally names the container backing this site. When
@@ -45,11 +49,36 @@ type monitorWidget struct {
 	ShowFailingOnly bool   `yaml:"show-failing-only"`
 	AgentURL        string `yaml:"agent-url"`
 	AgentToken      string `yaml:"token"`
-	HasFailing      bool   `yaml:"-"`
+	Uptime          struct {
+		Enabled bool          `yaml:"enabled"`
+		Range   durationField `yaml:"range"`
+	} `yaml:"uptime"`
+	HasFailing  bool `yaml:"-"`
+	HasDegraded bool `yaml:"-"`
 }
+
+// uptimeRangeDefault is used when uptime is enabled without an explicit range.
+const uptimeRangeDefault = 30 * 24 * time.Hour
+
+// uptimeRangeMin and uptimeRangeMax bound the configurable history window.
+const (
+	uptimeRangeMin = time.Hour
+	uptimeRangeMax = 90 * 24 * time.Hour
+)
 
 func (widget *monitorWidget) initialize() error {
 	widget.withTitle("Monitor").withCacheDuration(5 * time.Minute)
+
+	if widget.Uptime.Enabled {
+		if widget.Uptime.Range == 0 {
+			widget.Uptime.Range = durationField(uptimeRangeDefault)
+		}
+
+		r := time.Duration(widget.Uptime.Range)
+		if r < uptimeRangeMin || r > uptimeRangeMax {
+			return fmt.Errorf("uptime range %s is outside the supported bounds of 1h to 90d", r)
+		}
+	}
 
 	return nil
 }
@@ -73,14 +102,31 @@ func (widget *monitorWidget) update(ctx context.Context) {
 	}
 
 	widget.HasFailing = false
+	widget.HasDegraded = false
 
 	for i := range widget.Sites {
 		site := &widget.Sites[i]
 		status := &statuses[i]
 		site.Status = status
 
+		// History is recorded regardless of whether the bar is shown, so
+		// enabling it later reveals history accumulated while it was off.
+		if widget.Providers != nil && widget.Providers.uptimeStore != nil {
+			ok := status.Error == nil && !status.TimedOut && status.Code < 400
+			if err := widget.Providers.uptimeStore.record(site.Title, time.Now(), ok, status.ResponseTime); err != nil {
+				slog.Warn("Recording monitor check", "site", site.Title, "error", err)
+			}
+		}
+
 		if !slices.Contains(site.AltStatusCodes, status.Code) && (status.Code >= 400 || status.Error != nil) {
 			widget.HasFailing = true
+		}
+
+		if site.StateKey == "failing" {
+			widget.HasFailing = true
+		}
+		if site.StateKey == "degraded" {
+			widget.HasDegraded = true
 		}
 
 		if status.Error != nil && site.ErrorURL != "" {
@@ -91,6 +137,60 @@ func (widget *monitorWidget) update(ctx context.Context) {
 
 		site.StatusText = statusCodeToText(status.Code, site.AltStatusCodes)
 		site.StatusStyle = statusCodeToStyle(status.Code, site.AltStatusCodes)
+		site.StateKey, site.StateText = classifySiteState(status, site.AltStatusCodes)
+	}
+
+	widget.attachUptime()
+}
+
+// degradedResponseTime is the point above which a successful check counts as
+// degraded rather than healthy.
+const degradedResponseTime = 500 * time.Millisecond
+
+// classifySiteState maps a check outcome onto the three-state vocabulary. A
+// successful but slow answer is degraded, not healthy, so a service that works
+// poorly is distinguishable from one that works well.
+func classifySiteState(status *siteStatus, altStatusCodes []int) (key string, text string) {
+	if status.Error != nil || status.TimedOut || (status.Code >= 400 && !slices.Contains(altStatusCodes, status.Code)) {
+		return "failing", "Down"
+	}
+
+	if status.ResponseTime > degradedResponseTime {
+		return "degraded", "Degraded"
+	}
+
+	return "ok", "Operational"
+}
+
+// attachUptime fills in the availability bar for sites when the widget enables
+// it. Failures leave the bar empty rather than failing the widget.
+func (widget *monitorWidget) attachUptime() {
+	if !widget.Uptime.Enabled {
+		return
+	}
+
+	if widget.Providers == nil || widget.Providers.uptimeStore == nil {
+		return
+	}
+
+	window := time.Duration(widget.Uptime.Range)
+	if window == 0 {
+		window = uptimeRangeDefault
+	}
+
+	now := time.Now()
+
+	for i := range widget.Sites {
+		site := &widget.Sites[i]
+
+		buckets, err := widget.Providers.uptimeStore.uptime(site.Title, window, now)
+		if err != nil {
+			slog.Warn("Getting uptime history", "site", site.Title, "error", err)
+			continue
+		}
+
+		site.Uptime = buckets
+		site.HasUptime = true
 	}
 }
 
