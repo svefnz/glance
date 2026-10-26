@@ -22,7 +22,7 @@ func (widget *splitColumnWidget) initialize() error {
 		return err
 	}
 
-	if widget.MaxColumns < 2 {
+	if widget.MaxColumns < 1 {
 		widget.MaxColumns = 2
 	}
 
