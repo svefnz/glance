@@ -26,7 +26,7 @@
 
 - [x] 5.1 Confirm the abbreviations and HTTP status descriptions are unchanged: `CPU`, `ms`, `MB`, `GB`, `%`, `n/a`, and the status phrases. Verify by rendering a widget containing a failing service and reading its status description.
 - [x] 5.2 Run the full test suite and confirm it passes, since the classification text change touches tested code.
-- [ ] 5.3 Deploy and verify on the running instance that the Server page and the container widget show Chinese labels, and that no layout breaks from the wider or narrower text.
+- [x] 5.3 Deploy and verify on the running instance that the Server page and the container widget show Chinese labels, and that no layout breaks from the wider or narrower text.
 
 ## Workflow follow-up
 
