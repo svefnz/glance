@@ -44,6 +44,7 @@ type monitorWidget struct {
 	Style           string `yaml:"style"`
 	ShowFailingOnly bool   `yaml:"show-failing-only"`
 	AgentURL        string `yaml:"agent-url"`
+	AgentToken      string `yaml:"token"`
 	HasFailing      bool   `yaml:"-"`
 }
 
@@ -112,7 +113,7 @@ func (widget *monitorWidget) attachContainerUsage() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	usage, err := fetchAgentContainerUsage(ctx, widget.AgentURL)
+	usage, err := fetchAgentContainerUsage(ctx, widget.AgentURL, widget.AgentToken)
 	if err != nil {
 		slog.Warn("Getting container usage for monitor", "error", err)
 		return
@@ -255,12 +256,16 @@ func fetchStatusForSites(requests []*SiteStatusRequest) ([]siteStatus, error) {
 
 // fetchAgentContainerUsage reads container usage from a glance-agent and keys
 // it by container name so sites can look theirs up.
-func fetchAgentContainerUsage(ctx context.Context, agentURL string) (map[string]agentContainerStats, error) {
+func fetchAgentContainerUsage(ctx context.Context, agentURL, token string) (map[string]agentContainerStats, error) {
 	endpoint := strings.TrimRight(agentURL, "/") + "/api/containers"
 
 	request, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	response, err := defaultHTTPClient.Do(request)

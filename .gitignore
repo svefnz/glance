@@ -3,3 +3,14 @@
 /playground
 /.idea
 /glance*.yml
+
+# Local AI tooling config, not part of the project
+/.agents
+/.codebuddy
+/.opencode
+/.pi
+
+# The archived deployment change embeds a real secret-key, password hash and
+# temporary password. Never publish it. Remove this entry once the credentials
+# in those files have been redacted.
+/openspec/changes/archive/

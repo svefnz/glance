@@ -23,6 +23,7 @@ type dockerContainersWidget struct {
 	Category             string                       `yaml:"category"`
 	SockPath             string                       `yaml:"sock-path"`
 	AgentURL             string                       `yaml:"agent-url"`
+	AgentToken           string                       `yaml:"token"`
 	FormatContainerNames bool                         `yaml:"format-container-names"`
 	Containers           dockerContainerList          `yaml:"-"`
 	LabelOverrides       map[string]map[string]string `yaml:"containers"`
@@ -40,7 +41,7 @@ func (widget *dockerContainersWidget) initialize() error {
 
 func (widget *dockerContainersWidget) update(ctx context.Context) {
 	if widget.AgentURL != "" {
-		containers, err := fetchContainersFromAgent(widget.AgentURL, widget.LabelOverrides)
+		containers, err := fetchContainersFromAgent(widget.AgentURL, widget.AgentToken, widget.LabelOverrides)
 		if !widget.canContinueUpdateAfterHandlingErr(err) {
 			return
 		}
@@ -598,7 +599,7 @@ type agentContainerStats struct {
 // fetchContainersFromAgent reads container state and usage from a remote
 // glance-agent. The agent exposes a read-only view, so no Docker socket has to
 // be reachable from this host.
-func fetchContainersFromAgent(agentURL string, labelOverrides map[string]map[string]string) (dockerContainerList, error) {
+func fetchContainersFromAgent(agentURL, token string, labelOverrides map[string]map[string]string) (dockerContainerList, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -607,6 +608,10 @@ func fetchContainersFromAgent(agentURL string, labelOverrides map[string]map[str
 	request, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	response, err := defaultHTTPClient.Do(request)
