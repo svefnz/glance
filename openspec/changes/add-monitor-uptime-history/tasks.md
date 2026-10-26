@@ -32,11 +32,11 @@
 
 ## 5. Deployment
 
-- [ ] 5.1 Add a writable data directory mount to the deployment compose file and verify the container can write the database file there.
-- [ ] 5.2 Deploy the new image and verify the database file appears on the host under the mounted directory.
-- [ ] 5.3 Restart the container and verify the uptime bar still shows history recorded before the restart.
-- [ ] 5.4 Enable uptime on the three host monitor widgets with the 30-day default and verify each renders a bar with buckets that reflect the recorded checks.
-- [ ] 5.5 Document the data path, the retention behaviour, and the backup expectation in the deployment notes, and verify the notes name the database file and the mount.
+- [x] 5.1 Add a writable data directory mount to the deployment compose file and verify the container can write the database file there.
+- [x] 5.2 Deploy the new image and verify the database file appears on the host under the mounted directory.
+- [x] 5.3 Restart the container and verify the uptime bar still shows history recorded before the restart.
+- [x] 5.4 Enable uptime on the three host monitor widgets with the 30-day default and verify each renders a bar with buckets that reflect the recorded checks.
+- [x] 5.5 Document the data path, the retention behaviour, and the backup expectation in the deployment notes, and verify the notes name the database file and the mount.
 
 ## Workflow follow-up
 
